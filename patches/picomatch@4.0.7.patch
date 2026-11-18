@@ -1,0 +1,112 @@
+diff --git a/lib/parse.js b/lib/parse.js
+index 29207512c60183b4bb9bf5112be3b9b5f4a9a9fd..8de823d9e5d563b1eff5c89396223e13cd22ecd5 100644
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -270,6 +270,70 @@ const getStarExtglobSequenceChars = pattern => {
+   return chars;
+ };
+ 
++const isSelfRepeatingStarBranch = branch => {
++  let escaped = false;
++  let bracket = false;
++  let star = false;
++
++  for (let i = 0; i < branch.length; i++) {
++    const ch = branch[i];
++
++    if (escaped === true) {
++      escaped = false;
++      continue;
++    }
++
++    if (ch === '\\') {
++      escaped = true;
++      continue;
++    }
++
++    if (bracket === true) {
++      if (ch === ']') bracket = false;
++      continue;
++    }
++
++    if (ch === '[') {
++      bracket = true;
++      continue;
++    }
++
++    if (/[/(){}|!+@]/.test(ch)) {
++      return false;
++    }
++
++    if (ch === '*') {
++      if (branch[i + 1] === '*') {
++        return false;
++      }
++      star = true;
++    }
++  }
++
++  return star && !escaped && !bracket;
++};
++
++// Conservatively detect wildcard stars even inside nested extglobs. Escaped
++// stars and bracket-class stars are literal characters, not quantifiers.
++const containsWildcardStar = branch => {
++  let escaped = false;
++  let bracket = false;
++  for (const ch of branch) {
++    if (escaped) {
++      escaped = false;
++    } else if (ch === '\\') {
++      escaped = true;
++    } else if (bracket) {
++      if (ch === ']') bracket = false;
++    } else if (ch === '[') {
++      bracket = true;
++    } else if (ch === '*') {
++      return true;
++    }
++  }
++  return false;
++};
++
+ const repeatedExtglobRecursion = pattern => {
+   let depth = 0;
+   let value = pattern.trim();
+@@ -297,5 +361,15 @@ const analyzeRepeatedExtglob = (body, options) => {
+   const branches = splitTopLevel(body).map(branch => branch.trim());
+ 
++  // The upstream collapse is valid for one simple branch only. Adding an
++  // alternative must not restore nested unbounded quantifiers. Reject other
++  // star-containing shapes instead of emitting a potentially exponential regex.
++  if (branches.some(containsWildcardStar)) {
++    if (branches.length === 1 && isSelfRepeatingStarBranch(branches[0])) {
++      return { risky: false, collapse: true };
++    }
++    return { risky: true, reject: true };
++  }
++
+   if (branches.length > 1) {
+     if (
+       branches.some(branch => branch === '') ||
+@@ -542,6 +616,9 @@ const parse = (input, options) => {
+     const analysis = analyzeRepeatedExtglob(body, opts);
+ 
+     if ((token.type === 'plus' || token.type === 'star') && analysis.risky) {
++      if (analysis.reject) {
++        throw new SyntaxError('Unsafe repeated extglob containing wildcard stars: ' + literal);
++      }
+       const safeOutput = analysis.safeOutput
+         ? (token.output ? '' : ONE_CHAR) + (opts.capture ? `(${analysis.safeOutput})` : analysis.safeOutput)
+         : undefined;
+@@ -565,6 +642,10 @@ const parse = (input, options) => {
+       return;
+     }
+ 
++    if (analysis.collapse === true && (token.type === 'plus' || token.type === 'star')) {
++      token.close = token.type === 'plus' ? ')' : ')?';
++    }
++
+     let output = token.close + (opts.capture ? ')' : '');
+     let rest;
+ 

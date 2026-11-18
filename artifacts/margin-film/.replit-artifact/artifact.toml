@@ -1,0 +1,29 @@
+kind = "video"
+videoAspectRatio = "16:9"
+previewPath = "/margin-film/"
+title = "Margin — From notes to understanding"
+description = "A 30-second animated introduction to Margin: add notes, review source-linked items, approve a study library, and learn with flashcards and quizzes. Notes stay in the browser."
+version = "1.0.0"
+id = "artifacts/margin-film"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/margin-film/" ]
+localPort = 25112
+
+[services.development]
+run = "pnpm --filter @workspace/margin-film run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/margin-film", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/margin-film/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25112"
+BASE_PATH = "/margin-film/"
